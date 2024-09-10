@@ -8,6 +8,7 @@ import torch.distributed as dist
 from torch import nn, optim
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader
+from torcheval.metrics.functional import multiclass_accuracy
 from torchvision import datasets, models, transforms
 
 
@@ -65,6 +66,9 @@ def train(
         _, preds = torch.max(output, 1)
         train_correct += torch.sum(preds == label_device)
         count += 1
+
+        accuracy = multiclass_accuracy(input=output, target=label_device, num_classes=10, average="micro").item()
+        logger.debug("accuracy: %f", accuracy)
 
     # lossの平均値
     train_loss = train_loss / count
