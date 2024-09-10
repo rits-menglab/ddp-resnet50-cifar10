@@ -2,6 +2,7 @@ import codecs
 import time
 from logging import DEBUG, StreamHandler, getLogger
 
+import matplotlib.pyplot as plt
 import torch
 import torch.distributed as dist
 from torch import nn, optim
@@ -76,6 +77,8 @@ def learning(
     ddp_model: DistributedDataParallel,
     device_id: int,
     train_loader: DataLoader,
+    test_loader: DataLoader,
+    criterion: nn.CrossEntropyLoss,
     optimizer: optim.SGD,
     epochs: int,
 ) -> list:
@@ -85,11 +88,16 @@ def learning(
     test_acc = []
 
     for epoch in range(1, epochs + 1, 1):
-        train_loss, train_acc = train(ddp_model, device_id, train_loader, optimizer)
-        test_loss, test_acc = test(ddp_model, device_id, train_loader, optimizer)
+        train_loss, train_acc = train(ddp_model, device_id, train_loader, criterion, optimizer)
+        test_loss, test_acc = test(ddp_model, device_id, test_loader, criterion, optimizer)
         # エポック毎の表示
-        print(
-            f"{epoch} train_loss : {train_loss:.5f} train_acc : {train_acc:.5f} test_loss : {test_loss:.5f} test_acc : {test_acc:.5f}",
+        logger.info(
+            "epoch : %d, train_loss : %f, train_acc : %f, test_loss : %f, test_acc : %f,",
+            epoch,
+            train_loss,
+            train_acc,
+            test_loss,
+            test_acc,
         )
         train_loss.append(train_loss)
         train_acc.append(train_acc)
@@ -102,14 +110,6 @@ def learning(
 def main() -> None:
     # 時間計測用
     start = time.time()
-
-    # デバッグ用
-    logger = getLogger(__name__)
-    handler = StreamHandler()
-    handler.setLevel(DEBUG)
-    logger.setLevel(DEBUG)
-    logger.addHandler(handler)
-    logger.propagate = False
 
     # 変数もろもろ
     # batch_sizeの認識がずれてて datasetの総数//batch_sizeしたものが実際のbatch sizeになってる 50000//100=500的な感じ
@@ -192,22 +192,11 @@ def main() -> None:
         ddp_model=ddp_model,
         device_id=device_id,
         train_loader=train_loader,
+        test_loader=test_loader,
         criterion=criterion,
         optimizer=optimizer,
         epochs=epoch,
     )
-    print(
-        f"Test set: Average loss: {test_loss:.4f}, Accuracy: {correct}/{data_num} ({100.0 * correct / data_num:.0f}%)",
-        file=codecs.open("./pv/accuracy.txt", "w", "utf-8"),
-    )
-    train(
-        ddp_model=ddp_model,
-        device_id=device_id,
-        train_loader=train_loader,
-        optimizer=optimizer,
-        epoch=epoch,
-    )
-    test(ddp_model=ddp_model, device_id=device_id, test_loader=test_loader)
 
     # プロセス解放
     dist.destroy_process_group()
@@ -221,8 +210,37 @@ def main() -> None:
             time.time() - start,
             file=codecs.open("./pv/time.txt", "w", "utf-8"),
         )
-        torch.save(model.state_dict(), checkpoint_dir)
+        torch.save(ddp_model.state_dict(), checkpoint_dir)
+
+        # lossのグラフ描画
+        rate = plt.figure()
+        plt.plot(range(len(train_loss)), train_loss, c="b", label="train loss")
+        plt.plot(range(len(test_loss)), test_loss, c="r", label="test loss")
+        plt.xlabel("epoch")
+        plt.ylabel("loss")
+        plt.legend()
+        plt.grid()
+        plt.show()
+        rate.savefig("./pv/rate.png")
+
+        # accのグラフ描画
+        acc = plt.figure()
+        plt.plot(range(len(train_acc)), train_acc, c="b", label="train acc")
+        plt.plot(range(len(test_acc)), test_acc, c="r", label="test acc")
+        plt.xlabel("epoch")
+        plt.ylabel("acc")
+        plt.legend()
+        plt.grid()
+        plt.show()
+        acc.savefig("./pv/acc.png")
 
 
 if __name__ == "__main__":
+    # デバッグ用
+    logger = getLogger(__name__)
+    handler = StreamHandler()
+    handler.setLevel(DEBUG)
+    logger.setLevel(DEBUG)
+    logger.addHandler(handler)
+    logger.propagate = False
     main()
