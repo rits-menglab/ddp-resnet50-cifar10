@@ -8,7 +8,8 @@ import torch.distributed as dist
 from torch import nn, optim
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader
-from torcheval.metrics.functional import multiclass_accuracy
+from torcheval.metrics import MulticlassAccuracy
+from torcheval.metrics.toolkit import sync_and_compute
 from torchvision import datasets, models, transforms
 
 
@@ -43,10 +44,12 @@ def test(
 
 def train(
     ddp_model: DistributedDataParallel,
+    rank: int,
     device_id: int,
     train_loader: DataLoader,
     criterion: nn.CrossEntropyLoss,
     optimizer: optim.SGD,
+    metric: MulticlassAccuracy,
 ) -> float:
     count = 0
     train_loss = 0.0
@@ -54,6 +57,7 @@ def train(
 
     ddp_model.train()
     for _batch_idx, (data, label) in enumerate(train_loader):
+        count += len(label)
         data_device, label_device = data.to(device_id), label.to(device_id)
         optimizer.zero_grad()
         output = ddp_model(data_device)
@@ -65,10 +69,13 @@ def train(
         train_loss += loss.item()
         _, preds = torch.max(output, 1)
         train_correct += torch.sum(preds == label_device)
-        count += 1
 
-        accuracy = multiclass_accuracy(input=output, target=label_device, num_classes=10, average="micro").item()
-        logger.debug("accuracy: %f", accuracy)
+        metric.update(output, label_device)
+        local_compute_result = metric.compute()
+        global_compute_result = sync_and_compute(metric)
+        if rank == 0:
+            logger.info("Accuracy: %s", local_compute_result)
+    metric.reset()
 
     # lossの平均値
     train_loss = train_loss / count
@@ -79,6 +86,7 @@ def train(
 
 def learning(
     ddp_model: DistributedDataParallel,
+    rank: int,
     device_id: int,
     train_loader: DataLoader,
     test_loader: DataLoader,
@@ -91,8 +99,11 @@ def learning(
     test_loss_list = []
     test_acc_list = []
 
+    # 複数GPUからのaccを集計する
+    metric = MulticlassAccuracy(device=device_id)
+
     for epoch in range(1, epochs + 1, 1):
-        train_loss, train_acc = train(ddp_model, device_id, train_loader, criterion, optimizer)
+        train_loss, train_acc = train(ddp_model, rank, device_id, train_loader, criterion, optimizer, metric)
         test_loss, test_acc = test(ddp_model, device_id, test_loader, criterion)
         # エポック毎の表示
         logger.info(
@@ -194,6 +205,7 @@ def main() -> None:
     # トレーニング
     train_loss, train_acc, test_loss, test_acc = learning(
         ddp_model=ddp_model,
+        rank=rank,
         device_id=device_id,
         train_loader=train_loader,
         test_loader=test_loader,
