@@ -4,7 +4,7 @@
 
 ## 使い方
 
-- Pythonの環境には[Rye](https://rye.astral.sh/)を推奨しておきます
+- Pythonの環境には[UV](https://docs.astral.sh/uv/)を推奨しておきます
 
 - venvやcondaなどその他の環境を使っても 必要なパッケージさえインストールできれば問題ないです
 
@@ -16,13 +16,11 @@
     git clone https://github.com/rits-menglab/quine_mccluskey_python.git
     ```
 
-1. Ryeでの仮想環境作成
+1. UVでの仮想環境作成
 
     ```bash
-    rye sync
+    uv sync --dev
     ```
-
-1. VSCodeで開き 推奨される拡張機能をすべて導入する
 
 1. 以下のコマンドを実行(GPUが1台のマシンに2台搭載されている場合)
 
