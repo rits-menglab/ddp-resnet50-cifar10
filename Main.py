@@ -82,14 +82,14 @@ def learning(
     optimizer: optim.SGD,
     epochs: int,
 ) -> list:
-    train_loss = []
-    train_acc = []
-    test_loss = []
-    test_acc = []
+    train_loss_list = []
+    train_acc_list = []
+    test_loss_list = []
+    test_acc_list = []
 
     for epoch in range(1, epochs + 1, 1):
         train_loss, train_acc = train(ddp_model, device_id, train_loader, criterion, optimizer)
-        test_loss, test_acc = test(ddp_model, device_id, test_loader, criterion, optimizer)
+        test_loss, test_acc = test(ddp_model, device_id, test_loader, criterion)
         # エポック毎の表示
         logger.info(
             "epoch : %d, train_loss : %f, train_acc : %f, test_loss : %f, test_acc : %f,",
@@ -99,10 +99,10 @@ def learning(
             test_loss,
             test_acc,
         )
-        train_loss.append(train_loss)
-        train_acc.append(train_acc)
-        test_loss.append(test_loss)
-        test_acc.append(test_acc)
+        train_loss_list.append(train_loss)
+        train_acc_list.append(train_acc)
+        test_loss_list.append(test_loss)
+        test_acc_list.append(test_acc)
 
     return train_loss, train_acc, test_loss, test_acc
 
