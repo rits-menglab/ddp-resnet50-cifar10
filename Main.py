@@ -72,13 +72,16 @@ def train(
 
         metric.update(output, label_device)
         global_compute_result = sync_and_compute(metric)
-        if rank == 0:
-            logger.info("Accuracy: %s", global_compute_result)
-    metric.reset()
 
     # lossの平均値
     train_loss = train_loss / count
     train_correct = float(train_correct) / count
+
+    if rank == 0:
+        logger.info("Accuracy: %s", global_compute_result.item())
+
+    # エポック毎にmetricをリセットする
+    metric.reset()
 
     return train_loss, train_correct
 
@@ -99,7 +102,7 @@ def learning(
     test_acc_list = []
 
     # 複数GPUからのaccを集計する
-    device = torch.device("cuda:{device_id}")
+    device = torch.device(f"cuda:{device_id}")
     torch.cuda.set_device(device)
     metric = MulticlassAccuracy(device=device)
 
