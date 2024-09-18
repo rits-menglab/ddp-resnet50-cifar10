@@ -71,10 +71,9 @@ def train(
         train_correct += torch.sum(preds == label_device)
 
         metric.update(output, label_device)
-        local_compute_result = metric.compute()
         global_compute_result = sync_and_compute(metric)
         if rank == 0:
-            logger.info("Accuracy: %s", local_compute_result)
+            logger.info("Accuracy: %s", global_compute_result)
     metric.reset()
 
     # lossの平均値
