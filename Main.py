@@ -99,7 +99,9 @@ def learning(
     test_acc_list = []
 
     # 複数GPUからのaccを集計する
-    metric = MulticlassAccuracy(device=device_id)
+    device = torch.device("cuda:{device_id}")
+    torch.cuda.set_device(device)
+    metric = MulticlassAccuracy(device=device)
 
     for epoch in range(1, epochs + 1, 1):
         train_loss, train_acc = train(ddp_model, rank, device_id, train_loader, criterion, optimizer, metric)
