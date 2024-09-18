@@ -15,9 +15,11 @@ from torchvision import datasets, models, transforms
 
 def test(
     ddp_model: DistributedDataParallel,
+    rank: int,
     device_id: int,
     test_loader: DataLoader,
     criterion: nn.CrossEntropyLoss,
+    metric: MulticlassAccuracy,
 ) -> float:
     count = 0
     ddp_model.eval()
@@ -25,6 +27,7 @@ def test(
     test_correct = 0
     with torch.no_grad():
         for data, target in test_loader:
+            count += len(target)
             data_device, target_device = data.to(device_id), target.to(device_id)
             output = ddp_model(data_device)
             loss = criterion(output, target_device)
@@ -33,13 +36,18 @@ def test(
             test_loss += loss.item()
             _, preds = torch.max(output, 1)
             test_correct += torch.sum(preds == target_device)
-            count += 1
+
+            metric.update(output, target_device)
 
     # lossの平均値
     test_loss = test_loss / count
     test_correct = float(test_correct) / count
 
-    return test_loss, test_correct
+    global_compute_result = sync_and_compute(metric)
+    if rank == 0:
+        logger.info("Accuracy: %s", global_compute_result.item())
+
+    return test_loss, global_compute_result.item()
 
 
 def train(
@@ -71,12 +79,12 @@ def train(
         train_correct += torch.sum(preds == label_device)
 
         metric.update(output, label_device)
-        global_compute_result = sync_and_compute(metric)
 
     # lossの平均値
     train_loss = train_loss / count
     train_correct = float(train_correct) / count
 
+    global_compute_result = sync_and_compute(metric)
     if rank == 0:
         logger.info("Accuracy: %s", global_compute_result.item())
 
@@ -108,7 +116,7 @@ def learning(
 
     for epoch in range(1, epochs + 1, 1):
         train_loss, train_acc = train(ddp_model, rank, device_id, train_loader, criterion, optimizer, metric)
-        test_loss, test_acc = test(ddp_model, device_id, test_loader, criterion)
+        test_loss, test_acc = test(ddp_model, rank, device_id, test_loader, criterion, metric)
         # エポック毎の表示
         logger.info(
             "epoch : %d, train_loss : %f, train_acc : %f, test_loss : %f, test_acc : %f,",
@@ -123,7 +131,7 @@ def learning(
         test_loss_list.append(test_loss)
         test_acc_list.append(test_acc)
 
-    return train_loss, train_acc, test_loss, test_acc
+    return train_loss_list, train_acc_list, test_loss_list, test_acc_list
 
 
 def main() -> None:
