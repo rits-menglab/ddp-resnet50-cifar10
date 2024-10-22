@@ -13,7 +13,7 @@
 1. リポジトリのクローン
 
     ```bash
-    git clone https://github.com/rits-menglab/quine_mccluskey_python.git
+    git clone https://github.com/rits-menglab/ddp-resnet50-cifar10.git
     ```
 
 1. UVでの仮想環境作成
