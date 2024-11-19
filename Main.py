@@ -10,6 +10,7 @@ import torch
 import torch.distributed as dist
 from torch import nn, optim
 from torch.nn.parallel import DistributedDataParallel
+from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 from torcheval.metrics import MulticlassAccuracy
 from torcheval.metrics.toolkit import sync_and_compute
@@ -74,8 +75,6 @@ def train(
         optimizer.zero_grad()
         output = ddp_model(data_device)
         loss = criterion(output, label_device)
-        loss.backward()
-        optimizer.step()
 
         # lossの計算
         train_loss += loss.item()
@@ -83,6 +82,9 @@ def train(
         train_correct += torch.sum(preds == label_device)
 
         metric.update(output, label_device)
+
+        loss.backward()
+        optimizer.step()
 
     # lossの平均値
     train_loss = train_loss / count
@@ -106,6 +108,7 @@ def learning(
     test_loader: DataLoader,
     criterion: nn.CrossEntropyLoss,
     optimizer: optim.SGD,
+    scheduler: MultiStepLR,
     epochs: int,
 ) -> list:
     train_loss_list = []
@@ -135,6 +138,8 @@ def learning(
         test_loss_list.append(test_loss)
         test_acc_list.append(test_acc)
 
+        scheduler.step()
+
     return train_loss_list, train_acc_list, test_loss_list, test_acc_list
 
 
@@ -144,8 +149,8 @@ def main() -> None:
 
     # 変数もろもろ
     # batch_sizeの認識がずれてて datasetの総数//batch_sizeしたものが実際のbatch sizeになってる 50000//100=500的な感じ
-    batch_size = 250
-    epoch = 200
+    batch_size = 32
+    epoch = 300
 
     train_loss = []
     train_acc = []
@@ -178,16 +183,22 @@ def main() -> None:
     ddp_model = DistributedDataParallel(model, device_ids=[device_id])
 
     # CIFAR10関連
-    transform = transforms.Compose(
+    train_transform = transforms.Compose(
         [
-            transforms.RandomHorizontalFlip(p=0.5),
             transforms.ToTensor(),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-            transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0, inplace=False),
+            transforms.RandomHorizontalFlip(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            transforms.RandomCrop(size=32, padding=4),
         ],
     )
-    train_dataset = datasets.CIFAR10("./pv/data", train=True, download=True, transform=transform)
-    test_dataset = datasets.CIFAR10("./pv/data", train=False, transform=transform)
+    test_transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ],
+    )
+    train_dataset = datasets.CIFAR10("./pv/data", train=True, download=True, transform=train_transform)
+    test_dataset = datasets.CIFAR10("./pv/data", train=False, transform=test_transform)
     train_sampler = torch.utils.data.distributed.DistributedSampler(
         train_dataset,
         num_replicas=world_size,
@@ -221,6 +232,7 @@ def main() -> None:
     # 比較的精度が出やすい感じのチューンになっている
     # ref. https://qiita.com/TrashBoxx/items/2d441e46643f73c0ca19#3-1cifar-10%E3%82%92%E5%AD%A6%E7%BF%92%E3%81%99%E3%82%8B%E3%82%AF%E3%83%A9%E3%82%B9
     optimizer = optim.SGD(ddp_model.parameters(), lr=0.1, momentum=0.9, weight_decay=0.0001)
+    scheduler = MultiStepLR(optimizer, milestones=[110, 150, 190, 250], gamma=0.1)
 
     # トレーニング
     train_loss, train_acc, test_loss, test_acc = learning(
@@ -231,6 +243,7 @@ def main() -> None:
         test_loader=test_loader,
         criterion=criterion,
         optimizer=optimizer,
+        scheduler=scheduler,
         epochs=epoch,
     )
 
