@@ -1,6 +1,9 @@
 import codecs
+import os
 import time
-from logging import DEBUG, StreamHandler, getLogger
+from datetime import datetime
+from logging import DEBUG, INFO, StreamHandler, getLogger
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import torch
@@ -11,6 +14,7 @@ from torch.utils.data import DataLoader
 from torcheval.metrics import MulticlassAccuracy
 from torcheval.metrics.toolkit import sync_and_compute
 from torchvision import datasets, models, transforms
+from ZoneInfo import ZoneInfo
 
 
 def test(
@@ -188,13 +192,16 @@ def main() -> None:
         train_dataset,
         num_replicas=world_size,
         rank=rank,
-        shuffle=False,
+        shuffle=True,
     )
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=train_sampler is None,
         sampler=train_sampler,
+        pin_memory=True,
+        num_workers=int(os.cpu_count() / world_size),
+        persistent_workers=True,
     )
     test_sampler = torch.utils.data.distributed.DistributedSampler(
         test_dataset,
@@ -207,6 +214,7 @@ def main() -> None:
         batch_size=batch_size,
         shuffle=test_sampler is None,
         sampler=test_sampler,
+        pin_memory=True,
     )
 
     # オプティマイザ
@@ -266,9 +274,26 @@ def main() -> None:
 if __name__ == "__main__":
     # デバッグ用
     logger = getLogger(__name__)
-    handler = StreamHandler()
-    handler.setLevel(DEBUG)
+    console_handler = StreamHandler()
+    console_handler.setLevel(DEBUG)
+
+    # 現在の日時を使ってログファイル名を一意にする
+    timestamp = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y%m%d_%H%M%S")
+    log_filename = f"./logs/{timestamp}.log"
+
+    # ログファイル用ハンドラ
+    dir_path = "./logs/"
+    logs_dir = Path(dir_path)
+    if not logs_dir.is_dir():
+        logs_dir.mkdir()
+    file_handler = logger.FileHandler(filename=log_filename, encoding="utf-8")
+    file_handler.setLevel(INFO)
+    formatter = logger.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    file_handler.setFormatter(formatter)
+
+    # rootロガーにハンドラーを登録する
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
     logger.setLevel(DEBUG)
-    logger.addHandler(handler)
     logger.propagate = False
     main()
