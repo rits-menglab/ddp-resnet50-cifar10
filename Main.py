@@ -1,4 +1,4 @@
-import codecs
+import argparse
 import os
 import time
 from datetime import datetime
@@ -143,14 +143,14 @@ def learning(
     return train_loss_list, train_acc_list, test_loss_list, test_acc_list
 
 
-def main() -> None:
+def main(args: list) -> None:
     # 時間計測用
     start = time.time()
 
     # 変数もろもろ
     # batch_sizeの認識がずれてて datasetの総数//batch_sizeしたものが実際のbatch sizeになってる 50000//100=500的な感じ
-    batch_size = 32
-    epoch = 300
+    batch_size = args.bsz
+    epoch = args.epochs
 
     train_loss = []
     train_acc = []
@@ -163,7 +163,7 @@ def main() -> None:
     dist.init_process_group("nccl")
     # この部分はグローバルランクの取得
     # 順にrankが割り振られる masterは0
-    rank = dist.get_rank()
+    rank = args.rank
     # world_sizeはネットワーク全体のGPUの数
     world_size = dist.get_world_size()
     logger.info("This node is rank: %d.", rank)
@@ -254,12 +254,8 @@ def main() -> None:
 
     checkpoint_dir = "./pv/model.pth"
     if int(rank) == 0:
-        print(
-            "Process time: ",
-            time.time() - start,
-            file=codecs.open("./pv/time.txt", "w", "utf-8"),
-        )
-        torch.save(ddp_model.state_dict(), checkpoint_dir)
+        logger.info("Process time: %s", time.time() - start)
+        torch.save(ddp_model.module.state_dict(), checkpoint_dir)
 
         # lossのグラフ描画
         rate = plt.figure()
@@ -285,6 +281,19 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--world-size", type=int, default=2)
+    parser.add_argument("--rank", type=int, default=0)
+    parser.add_argument("--master-addr", type=str, default="127.0.0.1")
+    parser.add_argument("--master-port", type=str, default="62001")
+    parser.add_argument("--dir", type=str, default="/")
+    parser.add_argument("--bsz", type=int, default=32)
+    parser.add_argument("--epochs", type=int, default=300)
+
+    args = parser.parse_args()
+    os.environ["MASTER_ADDR"] = args.master_addr
+    os.environ["MASTER_PORT"] = args.master_port
+
     # デバッグ用
     logger = getLogger(__name__)
     console_handler = StreamHandler()
@@ -309,4 +318,4 @@ if __name__ == "__main__":
     logger.addHandler(file_handler)
     logger.setLevel(DEBUG)
     logger.propagate = False
-    main()
+    main(args)
